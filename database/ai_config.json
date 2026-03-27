@@ -1,8 +1,1 @@
-{
-  "1270616787809206364": {
-    "enabled": false,
-    "channels": [],
-    "respondToAll": true,
-    "provider": "groq"
-  }
-}
+{}

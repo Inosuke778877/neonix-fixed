@@ -5,199 +5,168 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Config file path
 const CONFIG_PATH = path.join(__dirname, '..', '..', 'database');
 const CONFIG_FILE = path.join(CONFIG_PATH, 'rpcConfig.json');
 
-// Default config
-const defaultConfig = {
-    enabled: false,
-    type: null,
-    name: null,
-    imageUrl: null
-};
+const defaultConfig = { enabled: false, type: null, name: null, imageUrl: null };
 
-// Valid activity types
 const VALID_TYPES = ['PLAYING', 'STREAMING', 'LISTENING', 'WATCHING'];
+const ACTIVITY_TYPES = { PLAYING: 0, STREAMING: 1, LISTENING: 2, WATCHING: 3 };
 
-// Activity type mapping
-const ACTIVITY_TYPES = {
-    'PLAYING': 0,
-    'STREAMING': 1,
-    'LISTENING': 2,
-    'WATCHING': 3
-};
+if (!fs.existsSync(CONFIG_PATH)) fs.mkdirSync(CONFIG_PATH, { recursive: true });
 
-// Ensure config directory exists
-if (!fs.existsSync(CONFIG_PATH)) {
-    fs.mkdirSync(CONFIG_PATH, { recursive: true });
-}
-
-// Load config
 function loadConfig() {
-    try {
-        if (fs.existsSync(CONFIG_FILE)) {
-            return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-        }
-    } catch (error) {
-        console.error('Error loading RPC config:', error);
-    }
-    return { ...defaultConfig };
+  try {
+    if (fs.existsSync(CONFIG_FILE)) return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+  } catch (e) { console.error('[RPC] Error loading config:', e); }
+  return { ...defaultConfig };
 }
 
-// Save config
 function saveConfig(config) {
-    try {
-        fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-    } catch (error) {
-        console.error('Error saving RPC config:', error);
-    }
+  try { fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2)); }
+  catch (e) { console.error('[RPC] Error saving config:', e); }
 }
 
-// Set Rich Presence
+// Detects any http/https URL regardless of extension or query string
+function isImageUrl(str) {
+  try {
+    const url = new URL(str);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 async function setRichPresence(client, config) {
-    try {
-        if (!config.enabled || !config.type || !config.name) {
-            await client.user.setActivity(null);
-            console.log('[RPC] Cleared');
-            return;
-        }
-
-        const activity = {
-            name: config.name,
-            type: ACTIVITY_TYPES[config.type],
-            url: config.type === 'STREAMING' ? 'https://twitch.tv/discord' : undefined
-        };
-
-        if (config.imageUrl) {
-            activity.assets = {
-                large_image: config.imageUrl,
-                large_text: config.name
-            };
-        }
-
-        await client.user.setActivity(activity);
-        console.log(`[RPC] Started: ${config.type} ${config.name}`);
-    } catch (error) {
-        console.error('[RPC] Error setting presence:', error);
-        throw error;
+  try {
+    if (!config.enabled || !config.type || !config.name) {
+      await client.user.setActivity(null);
+      console.log('[RPC] Cleared');
+      return;
     }
+
+    const activity = {
+      name: config.name,
+      type: ACTIVITY_TYPES[config.type],
+      url: config.type === 'STREAMING' ? 'https://twitch.tv/discord' : undefined,
+    };
+
+    if (config.imageUrl) {
+      // Use mp: prefix so Discord accepts external image URLs in RPC
+      activity.assets = {
+        large_image: `mp:${config.imageUrl}`,
+        large_text: config.name,
+      };
+    }
+
+    await client.user.setActivity(activity);
+    console.log(`[RPC] Set: ${config.type} "${config.name}"${config.imageUrl ? ' (with image)' : ''}`);
+  } catch (error) {
+    console.error('[RPC] Error setting presence:', error);
+    throw error;
+  }
 }
 
 export default {
-    name: 'rpc',
-    aliases: ['status', 'presence'],
-    category: 'utility',
-    description: 'Configure Rich Presence status',
-    usage: 'rpc <on/off/type> [text] [imageURL]',
-    
-    async execute(message, args, client) {
-        const config = loadConfig();
+  name: 'rpc',
+  aliases: ['status', 'presence'],
+  category: 'utility',
+  description: 'Configure Rich Presence status',
+  usage: 'rpc <on/off/TYPE> [text] [imageURL]',
 
-        // Show usage if no args
-        if (args.length === 0) {
-            let response = '```js\n';
-            response += '  Commands:\n';
-            response += '    rpc on/off\n';
-            response += '    rpc <TYPE> <text> <imageURL>\n\n';
-            response += '  Types:\n';
-            response += '    PLAYING\n';
-            response += '    STREAMING\n';
-            response += '    LISTENING\n';
-            response += '    WATCHING\n\n';
-            response += '  Examples:\n';
-            response += '    rpc PLAYING Minecraft\n';
-            response += '    rpc STREAMING Coding https://i.imgur.com/abc.png\n';
-            response += '    rpc on\n';
-            response += '    rpc off\n';
-            response += '\n╰──────────────────────────────────╯\n```';
-            await message.channel.send(response);
-            return;
-        }
+  async execute(message, args, client) {
+    const config = loadConfig();
 
-        const subCommand = args[0].toUpperCase();
-
-        try {
-            // Handle on/off commands
-            if (subCommand === 'ON' || subCommand === 'OFF') {
-                config.enabled = subCommand === 'ON';
-                saveConfig(config);
-                await setRichPresence(client, config);
-                
-                let response = '```js\n';
-                response += `  Status: ${config.enabled ? 'Enabled ✅' : 'Disabled ❌'}\n`;
-                if (config.enabled && config.name) {
-                    response += `  Type: ${config.type}\n`;
-                    response += `  Text: ${config.name}\n`;
-                }
-                response += '\n╰──────────────────────────────────╯\n```';
-                
-                await message.channel.send(response);
-                return;
-            }
-
-            // Handle status setting
-            if (!VALID_TYPES.includes(subCommand)) {
-                await message.channel.send('``````');
-                return;
-            }
-
-            if (args.length < 2) {
-                await message.channel.send('```js\nStatus text cannot be empty.\n```');
-                return;
-            }
-
-            // Check if last argument is a URL (image)
-            const lastArg = args[args.length - 1];
-            const isUrl = /^https?:\/\/.+\.(png|jpg|jpeg|gif|webp)$/i.test(lastArg);
-            
-            let name, imageUrl;
-            
-            if (isUrl) {
-                imageUrl = lastArg;
-                name = args.slice(1, -1).join(' ');
-            } else {
-                name = args.slice(1).join(' ');
-                imageUrl = null;
-            }
-
-            if (!name) {
-                await message.channel.send('```js\nStatus text cannot be empty.\n```');
-                return;
-            }
-
-            // Update config
-            config.type = subCommand;
-            config.name = name;
-            config.imageUrl = imageUrl;
-            config.enabled = true;
-
-            // Save and apply
-            saveConfig(config);
-            await setRichPresence(client, config);
-
-            let response = '```js\n';
-            response += `  Type: ${config.type}\n`;
-            response += `  Text: ${config.name}\n`;
-            response += `  Image: ${config.imageUrl || 'None'}\n`;
-            response += '  Status: Enabled ✅\n';
-            response += '\n╰──────────────────────────────────╯\n```';
-            
-            await message.channel.send(response);
-        } catch (error) {
-            console.error('[RPC] Command error:', error);
-            await message.channel.send('``````');
-        }
+    if (args.length === 0) {
+      return message.channel.send([
+        '```',
+        '╭─[ RPC CONFIG ]─╮\n',
+        '  rpc on/off',
+        '  rpc <TYPE> <text> [imageURL]\n',
+        '  Types: PLAYING, STREAMING, LISTENING, WATCHING\n',
+        '  Examples:',
+        '    rpc PLAYING Minecraft',
+        '    rpc WATCHING Netflix https://i.imgur.com/abc.png',
+        '    rpc STREAMING Coding https://cdn.discordapp.com/attachments/xyz/img.png?ex=abc',
+        '\n╰──────────────────────────────────╯',
+        '```',
+      ].join('\n'));
     }
+
+    const subCommand = args[0].toUpperCase();
+
+    try {
+      // ── on/off ──
+      if (subCommand === 'ON' || subCommand === 'OFF') {
+        config.enabled = subCommand === 'ON';
+        saveConfig(config);
+        await setRichPresence(client, config);
+
+        return message.channel.send([
+          '```',
+          '╭─[ RPC STATUS ]─╮\n',
+          `  Status: ${config.enabled ? 'Enabled ✅' : 'Disabled ❌'}`,
+          ...(config.enabled && config.name
+            ? [`  Type: ${config.type}`, `  Text: ${config.name}`]
+            : []),
+          '\n╰──────────────────────────────────╯',
+          '```',
+        ].join('\n'));
+      }
+
+      // ── type + text [+ imageURL] ──
+      if (!VALID_TYPES.includes(subCommand)) {
+        return message.channel.send(
+          `\`\`\`\n❌ Invalid type. Use: ${VALID_TYPES.join(', ')}\n\`\`\``
+        );
+      }
+
+      if (args.length < 2) {
+        return message.channel.send('```\n❌ Status text cannot be empty.\n```');
+      }
+
+      // Check if the last arg is any valid http/https URL (no extension required)
+      const lastArg = args[args.length - 1];
+      const hasImage = isImageUrl(lastArg);
+
+      const imageUrl = hasImage ? lastArg : null;
+      const name = hasImage ? args.slice(1, -1).join(' ') : args.slice(1).join(' ');
+
+      if (!name) {
+        return message.channel.send('```\n❌ Status text cannot be empty.\n```');
+      }
+
+      config.type = subCommand;
+      config.name = name;
+      config.imageUrl = imageUrl;
+      config.enabled = true;
+
+      saveConfig(config);
+      await setRichPresence(client, config);
+
+      return message.channel.send([
+        '```',
+        '╭─[ RPC UPDATED ]─╮\n',
+        `  Type:   ${config.type}`,
+        `  Text:   ${config.name}`,
+        `  Image:  ${config.imageUrl ?? 'None'}`,
+        '  Status: Enabled ✅',
+        '\n╰──────────────────────────────────╯',
+        '```',
+      ].join('\n'));
+    } catch (error) {
+      console.error('[RPC] Command error:', error);
+      await message.channel.send(`\`\`\`\n❌ RPC Error: ${error.message}\n\`\`\``);
+    }
+  },
 };
 
-// Export initialize function for use in index.js
 export async function initializeRPC(client) {
-    console.log('[RPC] Initializing Rich Presence system...');
-    try {
-        const config = loadConfig();
-        await setRichPresence(client, config);
-    } catch (error) {
-        console.error('[RPC] Failed to initialize:', error);
-    }
+  console.log('[RPC] Initializing Rich Presence...');
+  try {
+    const config = loadConfig();
+    await setRichPresence(client, config);
+  } catch (error) {
+    console.error('[RPC] Failed to initialize:', error);
+  }
 }
