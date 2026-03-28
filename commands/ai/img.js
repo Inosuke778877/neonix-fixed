@@ -13,7 +13,7 @@ export default {
     }
 
     const prompt = args.join(" ");
-    const apiKey = process.env.AI_API;
+    const apiKey = process.env.NVIDIA_NIM_API_KEY;
 
     if (!apiKey) {
       return message.reply({
